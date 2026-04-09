@@ -50,6 +50,20 @@ def get_system_arch():
     else:
         return "win32"
 
+def add_cv2_path():
+    # 获取 ./res 的绝对路径
+    res_path = os.path.abspath("./res")
+    sys.path.append(res_path)
+
+    # 针对 Python 3.8+ 的 Windows 环境，强制添加 DLL 搜索目录
+    if hasattr(os, "add_dll_directory"):
+        # headless 版本的 DLL 通常在 res/cv2 文件夹下
+        cv2_dir = os.path.join(res_path, "cv2")
+        if os.path.exists(cv2_dir):
+            try:
+                os.add_dll_directory(cv2_dir)
+            except Exception as e:
+                print(f"Adding DLL directory failed: {e}")
 
 def download_wheel(mirror_name, base_url, package_name, version=None):
     # 构造 URL
@@ -157,4 +171,5 @@ mapping = {
 }
 
 if __name__ == "__main__":
+    add_cv2_path()
     start()

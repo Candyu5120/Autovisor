@@ -21,7 +21,7 @@ from modules import installer
 event_loop_verify = asyncio.Event()
 event_loop_answer = asyncio.Event()
 
-
+# 加载Cookie并启动指定浏览器
 async def init_page(p: Playwright) -> tuple[Page, BrowserContext]:
     driver = "msedge" if config.driver == "edge" else config.driver
     logger.info(f"正在启动{config.driver}浏览器...")
@@ -53,6 +53,7 @@ async def init_page(p: Playwright) -> tuple[Page, BrowserContext]:
 
     return page, context
 
+# 存储Cookie实现自动登录
 async def auto_login(context: BrowserContext, page: Page, modules=None):
     async def request_handler(request):
         if "https://www.zhihuishu.com" in request.url:
@@ -249,14 +250,12 @@ async def main():
             await working_loop(page, is_new_version=is_new_version, is_hike_class=is_hike_class)
     print("==" * 10)
     logger.info("所有课程已学习完毕!")
-    show_donate("res/QRcode.jpg")
     # 结束所有协程任务
     await asyncio.gather(*tasks, return_exceptions=True) if tasks else None
     await monitor_task
 
 
 if __name__ == "__main__":
-    print("Github:CXRunfree All Rights Reserved.")
     logger = Logger()
     try:
         logger.info("程序启动中...")

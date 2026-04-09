@@ -11,16 +11,14 @@ cmd = (
     f"--onedir "
     f"--contents-directory=internal "
     f"--name={name} "
-    f"./Autovisor.py "
-    f"--exclude-module cv2 "
-    f"--exclude-module numpy "
-    f"--exclude-module matplotlib "
+    f"--collect-all cv2 "          # 确保 OpenCV 的所有 DLL 和元数据被抓取
+    f"--collect-all numpy "        # 确保 numpy 的元数据被抓取
+    f"./GUI.py "
 )
 os.system(cmd)
 
 os.mkdir(f"./dist/{name}/res")
 open(f"./dist/{name}/为防止启动失败, 建议使用Chrome浏览器", "w").close()
-shutil.copyfile("./res/QRcode.jpg", f"./dist/{name}/res/QRcode.jpg")
 shutil.copyfile("./configs.ini", f"./dist/{name}/configs.ini")
 shutil.copyfile("./res/stealth.min.js", f"./dist/{name}/res/stealth.min.js")
 shutil.rmtree("./build", ignore_errors=True)
