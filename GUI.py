@@ -1,6 +1,8 @@
 import configparser
 import os
 import threading
+import subprocess
+import sys
 from tkinter import ttk, messagebox, filedialog
 import tkinter as tk
 import sv_ttk
@@ -43,18 +45,43 @@ def show_help():
 
 
 def launch_script():
-    messagebox.showinfo('启动中', '准备刷课！')
-    os.system('python Autovisor.py')
+    def run_process():
+        try:
+            process = subprocess.Popen(
+                [sys.executable, '-u', 'Autovisor.py'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            for line in process.stdout:
+                root.after(0, append_log, line)
+            process.stdout.close()
+            process.wait()
+            root.after(0, append_log, f"\n[程序退出，状态码：{process.returncode}]\n")
+        except Exception as e:
+            root.after(0, append_log, f"\n[启动错误]: {str(e)}\n")
+
+    threading.Thread(target=run_process, daemon=True).start()
+
+
+def append_log(text):
+    log_text.config(state=tk.NORMAL)
+    log_text.insert(tk.END, text)
+    log_text.see(tk.END)
+    log_text.config(state=tk.DISABLED)
 
 
 def launch_script_in_thread():
-    threading.Thread(target=launch_script, daemon=True).start()
+    launch_script()
 
 
 def launch_direct():
     def run():
         messagebox.showinfo('提示', '已记录配置，开始刷课')
-        os.system('python Autovisor.py')
+        subprocess.run([sys.executable, 'Autovisor.py'], check=False)
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -113,7 +140,7 @@ def save_and_run():
 # === GUI 构建 ===
 root = tk.Tk()
 root.title("智慧树刷课助手")
-root.geometry("700x790+50+30")
+root.geometry("700x950+50+30")
 root.resizable(False, False)
 sv_ttk.set_theme("light")
 
@@ -249,6 +276,17 @@ start_button.pack(side=tk.LEFT, padx=5)
 # 查看帮助按钮
 help_button = ttk.Button(button_frame, text="❓ 查看帮助", command=show_help)
 help_button.pack(side=tk.LEFT, padx=5)
+
+# === 日志输出区域 ===
+log_frame = ttk.LabelFrame(main_frame, text="📝 运行日志", padding=10)
+log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+log_text = tk.Text(log_frame, wrap=tk.WORD, state=tk.DISABLED, font=("Consolas", 9), bg="#F8F9FA", height=12)
+log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+scrollbar = ttk.Scrollbar(log_frame, command=log_text.yview)
+scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+log_text.config(yscrollcommand=scrollbar.set)
 
 # 回车绑定
 root.bind('<Return>', lambda event: save_and_run())
