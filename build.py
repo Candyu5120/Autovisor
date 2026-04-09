@@ -6,7 +6,7 @@ cmd = (
     f"pyinstaller "
     f"--log-level=INFO "
     f"--noconfirm "
-    f"-c "
+    f"-w "
     f"-i ./res/zhs.ico "
     f"--onedir "
     f"--contents-directory=internal "

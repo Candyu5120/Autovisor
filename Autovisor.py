@@ -10,7 +10,6 @@ from playwright._impl._errors import TargetClosedError
 from modules.logger import Logger
 from modules.configs import Config
 from modules.progress import get_course_progress, show_course_progress
-from modules.support import show_donate
 from modules.utils import optimize_page, get_lesson_name, get_filtered_class, get_video_attr, hide_window, \
     get_browser_window, bring_console_to_front, save_cookies, load_cookies
 from modules.slider import slider_verify
@@ -23,17 +22,56 @@ event_loop_answer = asyncio.Event()
 
 # 加载Cookie并启动指定浏览器
 async def init_page(p: Playwright) -> tuple[Page, BrowserContext]:
-    driver = "msedge" if config.driver == "edge" else config.driver
-    logger.info(f"正在启动{config.driver}浏览器...")
-    browser = await p.chromium.launch(
-        channel=driver,
-        headless=False,
-        executable_path=config.exe_path if config.exe_path else None,
-        args=[
-            f'--window-size={1600},{900}',
-            '--window-position=100,100',  # 窗口位置
-        ],
-    )
+    preferred_driver = "msedge" if config.driver == "edge" else config.driver
+    launch_args = [
+        f'--window-size={1600},{900}',
+        '--window-position=100,100',
+    ]
+
+    # Edge 在部分机器首次启动时会直接退出，先重试，再回退 Chrome。
+    candidates = []
+    if preferred_driver == "firefox":
+        candidates.append(("firefox", None, config.exe_path if config.exe_path else None, 1))
+    else:
+        candidates.append(("chromium", preferred_driver, config.exe_path if config.exe_path else None, 2))
+        if preferred_driver == "msedge" and not config.exe_path:
+            candidates.append(("chromium", "chrome", None, 1))
+
+    last_error = None
+    browser = None
+    for engine, channel, exe_path, retry_count in candidates:
+        for attempt in range(1, retry_count + 1):
+            try:
+                driver_name = channel if channel else preferred_driver
+                logger.info(f"正在启动{driver_name}浏览器... (尝试 {attempt}/{retry_count})")
+                launch_kwargs = {
+                    "headless": False,
+                    "args": launch_args,
+                }
+                if channel:
+                    launch_kwargs["channel"] = channel
+                if exe_path:
+                    launch_kwargs["executable_path"] = exe_path
+
+                browser_engine = p.firefox if engine == "firefox" else p.chromium
+                browser = await browser_engine.launch(**launch_kwargs)
+                break
+            except TargetClosedError as e:
+                last_error = e
+                logger.warn(f"{driver_name} 启动失败: {repr(e)}")
+                await asyncio.sleep(1)
+            except Exception as e:
+                last_error = e
+                logger.warn(f"{driver_name} 启动失败: {repr(e)}")
+                break
+        if browser:
+            break
+
+    if not browser:
+        if last_error:
+            raise last_error
+        raise RuntimeError("浏览器启动失败")
+
     context = await browser.new_context()
     # 加载 Cookies
     cookies = load_cookies("res/cookies.json")
@@ -255,7 +293,8 @@ async def main():
     await monitor_task
 
 
-if __name__ == "__main__":
+def run():
+    global logger, config
     logger = Logger()
     try:
         logger.info("程序启动中...")
@@ -285,4 +324,10 @@ if __name__ == "__main__":
             logger.error("系统出错,请检查后重新启动!")
     finally:
         logger.save()
-        input("程序已结束,按Enter退出...")
+        # GUI 子进程模式下不等待键盘输入，避免进程挂起。
+        if os.environ.get("AUTOVISOR_NO_PROMPT") != "1" and sys.stdin and sys.stdin.isatty():
+            input("程序已结束,按Enter退出...")
+
+
+if __name__ == "__main__":
+    run()

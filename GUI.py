@@ -7,6 +7,7 @@ from tkinter import ttk, messagebox, filedialog
 import tkinter as tk
 import sv_ttk
 from tkinter import font
+import re
 
 # === 配置文件初始化 ===
 config = configparser.ConfigParser()
@@ -22,6 +23,8 @@ PRIMARY_COLOR = "#1F6FEB"
 SECONDARY_COLOR = "#F0F3F9"
 TEXT_COLOR = "#2C3E50"
 ACCENT_COLOR = "#0D47A1"
+
+ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
 
 # === 事件函数 ===
@@ -47,13 +50,28 @@ def show_help():
 def launch_script():
     def run_process():
         try:
+            if getattr(sys, 'frozen', False):
+                # 打包后再次启动当前 exe，并通过参数切到 worker 模式。
+                command = [sys.executable, '--worker']
+                work_dir = os.path.dirname(sys.executable)
+            else:
+                command = [sys.executable, '-u', os.path.abspath(__file__), '--worker']
+                work_dir = os.path.dirname(os.path.abspath(__file__))
+
+            env = os.environ.copy()
+            env['AUTOVISOR_NO_PROMPT'] = '1'
+            # 统一子进程输出编码，避免中文日志在管道中乱码。
+            env.setdefault('PYTHONIOENCODING', 'utf-8')
+            env.setdefault('PYTHONUTF8', '1')
             process = subprocess.Popen(
-                [sys.executable, '-u', 'Autovisor.py'],
+                command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
+                cwd=work_dir,
+                env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             for line in process.stdout:
@@ -68,8 +86,10 @@ def launch_script():
 
 
 def append_log(text):
+    # 清理 ANSI 颜色码与回车覆盖符，提升 GUI 日志可读性。
+    clean = ANSI_ESCAPE_RE.sub('', text).replace('\r', '')
     log_text.config(state=tk.NORMAL)
-    log_text.insert(tk.END, text)
+    log_text.insert(tk.END, clean)
     log_text.see(tk.END)
     log_text.config(state=tk.DISABLED)
 
@@ -135,6 +155,17 @@ def save_and_run():
         config.write(f)
 
     launch_script_in_thread()
+
+
+# worker 模式：不创建 GUI，直接执行 Autovisor 主流程。
+def run_worker_mode():
+    from Autovisor import run as run_autovisor
+    run_autovisor()
+
+
+if '--worker' in sys.argv:
+    run_worker_mode()
+    sys.exit(0)
 
 
 # === GUI 构建 ===
