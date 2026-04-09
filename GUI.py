@@ -72,6 +72,10 @@ def browse_exe_path():
         exe_path_entry.insert(0, selected_path)
 
 
+def clear_exe_path():
+    exe_path_entry.delete(0, tk.END)
+
+
 def read_inputs():
     return {
         "username": username_entry.get(),
@@ -198,6 +202,9 @@ exe_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
 browse_button = ttk.Button(path_input_frame, text="浏览...", command=browse_exe_path, width=10)
 browse_button.pack(side=tk.LEFT, padx=(8, 0))
+
+clear_button = ttk.Button(path_input_frame, text="清空", command=clear_exe_path, width=8)
+clear_button.pack(side=tk.LEFT, padx=(6, 0))
 
 # 提示文本
 hint_label = ttk.Label(browser_frame, text="（留空则使用系统默认路径）", font=("Microsoft YaHei", 8))
