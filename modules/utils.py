@@ -2,7 +2,7 @@ import ctypes
 import json
 import os.path
 import traceback
-from typing import List
+from typing import List, Optional
 from playwright.async_api import Page, Locator
 from playwright.async_api import TimeoutError
 from pygetwindow import Win32Window
@@ -56,7 +56,7 @@ async def hide_window(page: Page) -> None:
         logger.warn("未找到播放窗口!")
 
 
-async def get_browser_window(page: Page) -> Win32Window | None:
+async def get_browser_window(page: Page) -> Optional[Win32Window]:
     custom_title = "Autovisor - Playwright"
     await page.wait_for_load_state("domcontentloaded")
     await page.evaluate(f'document.title = "{custom_title}"')
