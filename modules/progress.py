@@ -1,9 +1,17 @@
 # encoding=utf-8
 import random
+import sys
 from playwright.async_api import Page, TimeoutError
 from modules.logger import Logger
 
 logger = Logger()
+
+
+def _is_tty() -> bool:
+    try:
+        return bool(sys.stdout) and sys.stdout.isatty()
+    except Exception:
+        return False
 
 
 # 视频区域内移动鼠标
@@ -65,7 +73,11 @@ def show_course_progress(desc, cur_time=None, limit_time=0):
         percent = max(0, min(percent, 100))
         length = int(percent * 30 // 100)
         progress = ("█" * length).ljust(30, " ")
-        print(f"\r{desc} |{progress}| {percent}%\t".ljust(50), end="", flush=True)
+        line = f"{desc} |{progress}| {percent}%"
+        if _is_tty():
+            print(f"\r{line}\t".ljust(50), end="", flush=True)
+        else:
+            print(line, flush=True)
     else:
         cur_time = 0 if cur_time == '' or cur_time is None else cur_time
         if isinstance(cur_time, str):
@@ -77,7 +89,11 @@ def show_course_progress(desc, cur_time=None, limit_time=0):
         percent = max(0, min(percent, 100))
         length = int(percent * 20 // 100)
         progress = ("█" * length).ljust(20, " ")
-        print(f"\r{desc} |{progress}| {percent}%\t剩余 {left_time} min\t".ljust(50), end="", flush=True)
+        line = f"{desc} |{progress}| {percent}%\t剩余 {left_time} min"
+        if _is_tty():
+            print(f"\r{line}\t".ljust(50), end="", flush=True)
+        else:
+            print(line, flush=True)
 
 
 # 打印通用版进度条
@@ -85,4 +101,8 @@ def show_progress(desc, current, total, suffix="", width=30):
     percent = int(current / total * 100)
     length = int(percent * width // 100)
     progress = ("█" * length).ljust(width, " ")
-    print(f"\r{desc} |{progress}| {percent}%\t{suffix}".ljust(50), end="", flush=True)
+    line = f"{desc} |{progress}| {percent}%\t{suffix}"
+    if _is_tty():
+        print(f"\r{line}".ljust(50), end="", flush=True)
+    else:
+        print(line, flush=True)

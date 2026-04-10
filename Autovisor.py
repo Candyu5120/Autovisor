@@ -20,29 +20,136 @@ from modules import installer
 event_loop_verify = asyncio.Event()
 event_loop_answer = asyncio.Event()
 
+# Win系统常见浏览器路径
+def _get_browser_path_candidates() -> dict[str, list[str]]:
+    return {
+        "msedge": [
+            os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+            os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+        ],
+        "chrome": [
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        ],
+    }
+
+
+def _find_playwright_chromium_exe() -> str | None:
+    browsers_root = os.path.expandvars(r"%LOCALAPPDATA%\ms-playwright")
+    if not os.path.isdir(browsers_root):
+        return None
+
+    try:
+        chromium_dirs = sorted(
+            (d for d in os.listdir(browsers_root) if d.startswith("chromium-")),
+            reverse=True,
+        )
+    except OSError:
+        return None
+
+    for folder in chromium_dirs:
+        exe_path = os.path.join(browsers_root, folder, "chrome-win", "chrome.exe")
+        if os.path.exists(exe_path):
+            return exe_path
+    return None
+
+
+def startup_browser_preflight() -> None:
+    preferred_driver = "msedge" if config.driver == "edge" else config.driver
+    custom_exe = config.exe_path.strip() if config.exe_path else ""
+    custom_exists = bool(custom_exe) and os.path.exists(custom_exe)
+
+    candidates = _get_browser_path_candidates()
+    has_edge = any(os.path.exists(path) for path in candidates["msedge"])
+    has_chrome = any(os.path.exists(path) for path in candidates["chrome"])
+    has_playwright_chromium = _find_playwright_chromium_exe() is not None
+
+    available = []
+    if has_edge:
+        available.append("msedge")
+    if has_chrome:
+        available.append("chrome")
+    if has_playwright_chromium:
+        available.append("chromium(playwright)")
+    if custom_exists:
+        available.append("custom_exe")
+
+    logger.info("浏览器预检: 可用目标 -> " + (", ".join(available) if available else "无"))
+
+    if custom_exe and not custom_exists:
+        logger.warn(f"浏览器预检: EXE_PATH 不存在 -> {custom_exe}")
+
+    if preferred_driver == "firefox":
+        if custom_exe and not custom_exists:
+            logger.warn("当前 driver=firefox 且 EXE_PATH 无效，可能导致启动失败")
+        return
+
+    driver_ready = (
+        custom_exists
+        or (preferred_driver == "msedge" and has_edge)
+        or (preferred_driver == "chrome" and has_chrome)
+        or (preferred_driver == "chromium" and has_playwright_chromium)
+    )
+
+    fallback_ready = has_chrome or has_playwright_chromium
+    if preferred_driver == "chrome":
+        fallback_ready = has_playwright_chromium
+
+    if not driver_ready:
+        logger.warn(
+            f"浏览器预检: 当前 driver={preferred_driver} 可能不可用，将在运行时自动回退"
+        )
+
+    if not driver_ready and not fallback_ready:
+        logger.warn("建议先执行: python -m playwright install chromium")
+
+
 # 加载Cookie并启动指定浏览器
 async def init_page(p: Playwright) -> tuple[Page, BrowserContext]:
     preferred_driver = "msedge" if config.driver == "edge" else config.driver
     launch_args = [
         f'--window-size={1600},{900}',
         '--window-position=100,100',
+        '--disable-infobars',
     ]
 
-    # Edge 在部分机器首次启动时会直接退出，先重试，再回退 Chrome。
+    exe_path = config.exe_path.strip() if config.exe_path else None
+    if exe_path and not os.path.exists(exe_path):
+        logger.warn(f"浏览器路径不存在: {exe_path}, 将忽略该配置并使用默认查找方式")
+        exe_path = None
+
+    # Edge 在部分机器首次启动时会直接退出，先重试，再回退其他可用 Chromium。
     candidates = []
     if preferred_driver == "firefox":
-        candidates.append(("firefox", None, config.exe_path if config.exe_path else None, 1))
+        candidates.append(("firefox", None, exe_path, 1))
     else:
-        candidates.append(("chromium", preferred_driver, config.exe_path if config.exe_path else None, 2))
-        if preferred_driver == "msedge" and not config.exe_path:
-            candidates.append(("chromium", "chrome", None, 1))
+        if preferred_driver in {"msedge", "chrome"}:
+            candidates.append(("chromium", preferred_driver, exe_path, 2))
+        elif preferred_driver == "chromium":
+            candidates.append(("chromium", None, exe_path, 2))
+        else:
+            # 兼容旧配置值，先按 channel 尝试，再回退到 Playwright Chromium。
+            candidates.append(("chromium", preferred_driver, exe_path, 2))
+
+        if preferred_driver == "msedge":
+            chrome_path = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe")
+            if os.path.exists(chrome_path):
+                candidates.append(("chromium", "chrome", None, 2))
+            else:
+                logger.info("未检测到本机 Chrome，跳过 Chrome 回退")
+
+        # 最后兜底使用 Playwright 自带 Chromium（若已安装 playwright chromium）。
+        candidates.append(("chromium", None, None, 2))
 
     last_error = None
+    launch_errors = []
+    launched_driver_name = preferred_driver
     browser = None
-    for engine, channel, exe_path, retry_count in candidates:
+    for engine, channel, candidate_exe_path, retry_count in candidates:
+        driver_name = channel if channel else ("firefox" if engine == "firefox" else "chromium")
         for attempt in range(1, retry_count + 1):
             try:
-                driver_name = channel if channel else preferred_driver
                 logger.info(f"正在启动{driver_name}浏览器... (尝试 {attempt}/{retry_count})")
                 launch_kwargs = {
                     "headless": False,
@@ -50,26 +157,31 @@ async def init_page(p: Playwright) -> tuple[Page, BrowserContext]:
                 }
                 if channel:
                     launch_kwargs["channel"] = channel
-                if exe_path:
-                    launch_kwargs["executable_path"] = exe_path
+                if candidate_exe_path:
+                    launch_kwargs["executable_path"] = candidate_exe_path
 
                 browser_engine = p.firefox if engine == "firefox" else p.chromium
                 browser = await browser_engine.launch(**launch_kwargs)
+                launched_driver_name = driver_name
                 break
             except TargetClosedError as e:
                 last_error = e
+                launch_errors.append(f"{driver_name} 第{attempt}次: {repr(e)}")
                 logger.warn(f"{driver_name} 启动失败: {repr(e)}")
                 await asyncio.sleep(1)
             except Exception as e:
                 last_error = e
+                launch_errors.append(f"{driver_name} 第{attempt}次: {repr(e)}")
                 logger.warn(f"{driver_name} 启动失败: {repr(e)}")
                 break
         if browser:
             break
 
     if not browser:
+        if launch_errors:
+            logger.error("浏览器启动失败，尝试详情:\n" + "\n".join(launch_errors[-5:]))
         if last_error:
-            raise last_error
+            raise RuntimeError("浏览器启动失败: 所有候选浏览器均不可用") from last_error
         raise RuntimeError("浏览器启动失败")
 
     context = await browser.new_context()
@@ -81,7 +193,7 @@ async def init_page(p: Playwright) -> tuple[Page, BrowserContext]:
     else:
         logger.info("未找到 Cookies,将跳转至登录页.")
     page = await context.new_page()
-    logger.write_log(f"{config.driver}浏览器启动完成.\n")
+    logger.write_log(f"{launched_driver_name}浏览器启动完成.\n")
     #抹去特征
     with open('res/stealth.min.js', 'r') as f:
         js = f.read()
@@ -303,6 +415,7 @@ def run():
             logger.info("未检测到有效网址或不支持此类网页,请检查配置文件!")
             time.sleep(2)
             sys.exit(-1)
+        startup_browser_preflight()
         asyncio.run(main())
     except TargetClosedError as e:
         logger.write_log(traceback.format_exc())

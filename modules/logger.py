@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import time
 
@@ -31,26 +32,42 @@ class Logger:
         if inform:
             print(f"日志文件已保存至: {self.filename}")
 
+    @staticmethod
+    def _is_tty() -> bool:
+        try:
+            return bool(sys.stdout) and sys.stdout.isatty()
+        except Exception:
+            return False
+
     def info(self, msg, shift=False):
-        if shift:
-            text = f"\r\n\033[32m[INFO]\033[0m {msg}"
+        if self._is_tty():
+            if shift:
+                text = f"\r\n\033[32m[INFO]\033[0m {msg}"
+            else:
+                text = f"\r\033[32m[INFO]\033[0m {msg}"
+            print(text.ljust(50), flush=True)
         else:
-            text = f"\r\033[32m[INFO]\033[0m {msg}"
-        print(text.ljust(50))
+            print(f"[INFO] {msg}", flush=True)
         self.write_log(f"[INFO] {msg}\n")
 
     def warn(self, msg, shift=False):
-        if shift:
-            text = f"\r\n\033[33m[WARN]\033[0m {msg}"
+        if self._is_tty():
+            if shift:
+                text = f"\r\n\033[33m[WARN]\033[0m {msg}"
+            else:
+                text = f"\r\033[33m[WARN]\033[0m {msg}"
+            print(text.ljust(50), flush=True)
         else:
-            text = f"\r\033[33m[WARN]\033[0m {msg}"
-        print(text.ljust(50))
+            print(f"[WARN] {msg}", flush=True)
         self.write_log(f"[WARN] {msg}\n")
 
     def error(self, msg, shift=False):
-        if shift:
-            text = f"\r\n\033[31m[ERROR]\033[0m {msg}"
+        if self._is_tty():
+            if shift:
+                text = f"\r\n\033[31m[ERROR]\033[0m {msg}"
+            else:
+                text = f"\r\033[31m[ERROR]\033[0m {msg}"
+            print(text.ljust(50), flush=True)
         else:
-            text = f"\r\033[31m[ERROR]\033[0m {msg}"
-        print(text.ljust(50))
+            print(f"[ERROR] {msg}", flush=True)
         self.write_log(f"[ERROR] {msg}\n")

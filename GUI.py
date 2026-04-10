@@ -3,323 +3,302 @@ import os
 import threading
 import subprocess
 import sys
-from tkinter import ttk, messagebox, filedialog
-import tkinter as tk
-import sv_ttk
-from tkinter import font
 import re
+import flet as ft
+
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+if sys.stdin is None:
+    sys.stdin = open(os.devnull, 'r')
 
 # === 配置文件初始化 ===
 config = configparser.ConfigParser()
 config_file = 'configs.ini'
 config.read(config_file, encoding="utf-8")
 
-# === 默认配置 ===
-default_driver = "Edge"
-default_exepath = ""
-
-# === 颜色主题 ===
-PRIMARY_COLOR = "#1F6FEB"
-SECONDARY_COLOR = "#F0F3F9"
-TEXT_COLOR = "#2C3E50"
-ACCENT_COLOR = "#0D47A1"
-
 ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
-
-
-# === 事件函数 ===
-def show_help():
-    help_text = (
-        "【必要配置说明】\n"
-        "账号密码：可选项，如留空需手动登录\n"
-        "课程链接：从智慧树课程页面复制链接（以 studyvideoh5.zhihuishu.com 开头）\n"
-        "时长限制：程序运行的最大时间，0 表示不限\n"
-        "倍速播放：最大 1.8（平台限制）\n\n"
-        "【选填功能】\n"
-        "自动跳过验证码：自动完成滑动验证\n"
-        "隐藏浏览器窗口：运行时最小化浏览器\n"
-        "静音播放：关闭视频声音\n\n"
-        "输入 True 启用，留空或填 False 表示关闭\n\n"
-        "【常见问题】\n"
-        "Q: 浏览器启动失败？\n"
-        "A: 请尝试双击 Autovisor.exe 运行。"
-    )
-    messagebox.showinfo('使用说明', help_text)
-
-
-def launch_script():
-    def run_process():
-        try:
-            if getattr(sys, 'frozen', False):
-                # 打包后再次启动当前 exe，并通过参数切到 worker 模式。
-                command = [sys.executable, '--worker']
-                work_dir = os.path.dirname(sys.executable)
-            else:
-                command = [sys.executable, '-u', os.path.abspath(__file__), '--worker']
-                work_dir = os.path.dirname(os.path.abspath(__file__))
-
-            env = os.environ.copy()
-            env['AUTOVISOR_NO_PROMPT'] = '1'
-            # 统一子进程输出编码，避免中文日志在管道中乱码。
-            env.setdefault('PYTHONIOENCODING', 'utf-8')
-            env.setdefault('PYTHONUTF8', '1')
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                cwd=work_dir,
-                env=env,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
-            for line in process.stdout:
-                root.after(0, append_log, line)
-            process.stdout.close()
-            process.wait()
-            root.after(0, append_log, f"\n[程序退出，状态码：{process.returncode}]\n")
-        except Exception as e:
-            root.after(0, append_log, f"\n[启动错误]: {str(e)}\n")
-
-    threading.Thread(target=run_process, daemon=True).start()
-
-
-def append_log(text):
-    # 清理 ANSI 颜色码与回车覆盖符，提升 GUI 日志可读性。
-    clean = ANSI_ESCAPE_RE.sub('', text).replace('\r', '')
-    log_text.config(state=tk.NORMAL)
-    log_text.insert(tk.END, clean)
-    log_text.see(tk.END)
-    log_text.config(state=tk.DISABLED)
-
-
-def launch_script_in_thread():
-    launch_script()
-
-
-def launch_direct():
-    def run():
-        messagebox.showinfo('提示', '已记录配置，开始刷课')
-        subprocess.run([sys.executable, 'Autovisor.py'], check=False)
-
-    threading.Thread(target=run, daemon=True).start()
-
-
-def browse_exe_path():
-    # Open native Windows picker for browser executable selection.
-    selected_path = filedialog.askopenfilename(
-        title="选择浏览器可执行文件",
-        filetypes=[("可执行文件", "*.exe"), ("所有文件", "*.*")],
-        initialfile=os.path.basename(exe_path_entry.get().strip()) if exe_path_entry.get().strip() else "",
-        initialdir=os.path.dirname(exe_path_entry.get().strip()) if exe_path_entry.get().strip() else os.getcwd()
-    )
-    if selected_path:
-        exe_path_entry.delete(0, tk.END)
-        exe_path_entry.insert(0, selected_path)
-
-
-def clear_exe_path():
-    exe_path_entry.delete(0, tk.END)
-
-
-def read_inputs():
-    return {
-        "username": username_entry.get(),
-        "password": password_entry.get(),
-        "course_url": course_entry.get(),
-        "limit_time": time_limit_entry.get(),
-        "speed": speed_entry.get(),
-        "auto_captcha": verify_var.get(),
-        "hide_window": hide_var.get(),
-        "mute": mute_var.get(),
-        "driver": driver_var.get(),
-        "exe_path": exe_path_entry.get()
-    }
-
-
-def save_and_run():
-    inputs = read_inputs()
-    config.set('course-url', 'URL1', inputs['course_url'])
-    config.set('user-account', 'username', inputs['username'])
-    config.set('user-account', 'password', inputs['password'])
-    config.set('browser-option', 'driver', inputs['driver'])
-    config.set('browser-option', 'exe_path', inputs['exe_path'])
-    config.set('script-option', 'enableautocaptcha', inputs['auto_captcha'])
-    config.set('script-option', 'enablehidewindow', inputs['hide_window'])
-    config.set('course-option', 'limitmaxtime', inputs['limit_time'])
-    config.set('course-option', 'limitspeed', inputs['speed'])
-    config.set('course-option', 'soundoff', inputs['mute'])
-
-    with open(config_file, 'w', encoding="utf-8") as f:
-        config.write(f)
-
-    launch_script_in_thread()
-
 
 # worker 模式：不创建 GUI，直接执行 Autovisor 主流程。
 def run_worker_mode():
     from Autovisor import run as run_autovisor
     run_autovisor()
 
-
 if '--worker' in sys.argv:
     run_worker_mode()
     sys.exit(0)
 
+# === Flet GUI 构建 ===
+def main(page: ft.Page):
+    # 页面基础配置
+    page.title = "智慧树刷课助手"
+    page.window.width = 1100
+    page.window.height = 800
+    page.window.min_width = 950
+    page.window.min_height = 650
+    page.theme_mode = ft.ThemeMode.SYSTEM
 
-# === GUI 构建 ===
-root = tk.Tk()
-root.title("智慧树刷课助手")
-root.geometry("700x950+50+30")
-root.resizable(False, False)
-sv_ttk.set_theme("light")
+    # 去掉全局窗口透明度（Windows下强制透明度会导致ClearType字体平滑失效，从而导致文字发虚变形）
+    # try:
+    #     page.window.opacity = 0.94
+    # except:
+    #     pass
 
-# 设置窗口背景颜色
-root.configure(bg=SECONDARY_COLOR)
+    def get_config(section, option, default=""):
+        try:
+            return config.get(section, option)
+        except:
+            return default
 
-# === 标题区域 ===
-title_frame = ttk.Frame(root)
-title_frame.pack(fill=tk.X, padx=0, pady=0)
-title_frame.configure(style="TFrame")
+    # ====================
+    # 左侧：控制台日志区域
+    # ====================
+    log_list = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+    log_panel = ft.Container(
+        content=log_list,
+        expand=True,
+        bgcolor="#1E1E1E",
+        border_radius=12,
+        padding=15,
+        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+    )
 
-# 自定义标题样式
-title_label = ttk.Label(root, text="🎓 智慧树刷课助手", font=("Microsoft YaHei", 24, "bold"))
-title_label.pack(pady=20)
+    log_buffer = []
+    buffer_lock = threading.Lock()
 
-# 分隔线
-separator1 = ttk.Separator(root, orient=tk.HORIZONTAL)
-separator1.pack(fill=tk.X, padx=20, pady=5)
+    def flush_all_logs():
+        with buffer_lock:
+            if not log_buffer:
+                return
+            lines = log_buffer[:]
+            log_buffer.clear()
+        for line in lines:
+            log_list.controls.append(ft.Text(line, font_family="Consolas", color="#10B981", size=13))
+        page.update()
 
-# === 主容器 ===
-main_frame = ttk.Frame(root)
-main_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
+    def log_updater():
+        import time
+        while True:
+            # 低延迟批量刷新，避免日志堆积后出现“延后清空感”。
+            time.sleep(0.1)
+            flush_all_logs()
 
-# 从configs.ini读取默认值
-def get_config(section, option, default=""):
-    try:
-        return config.get(section, option)
-    except:
-        return default
+    # 启动后台日志刷新线程
+    threading.Thread(target=log_updater, daemon=True).start()
 
-# === 必填项区域 ===
-required_frame = ttk.LabelFrame(main_frame, text="📋 必要配置", padding=15)
-required_frame.pack(fill=tk.X, pady=10)
+    def append_log(text):
+        # 去除额外的换行符，避免日志中出现不必要的空白行
+        clean = ANSI_ESCAPE_RE.sub('', text).replace('\r', '').rstrip('\n')
+        if clean:
+            with buffer_lock:
+                log_buffer.append(clean)
 
-ttk.Label(required_frame, text="手机号：", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
-username_entry = ttk.Entry(required_frame, width=35, font=("Microsoft YaHei", 10))
-username_entry.insert(0, get_config('user-account', 'username'))
-username_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+    def launch_script():
+        def run_process():
+            try:
+                if getattr(sys, 'frozen', False):
+                    command = [sys.executable, '--worker']
+                    work_dir = os.path.dirname(sys.executable)
+                else:
+                    command = [sys.executable, '-u', os.path.abspath(__file__), '--worker']
+                    work_dir = os.path.dirname(os.path.abspath(__file__))
 
-ttk.Label(required_frame, text="密码：", font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
-password_entry = ttk.Entry(required_frame, show='*', width=35, font=("Microsoft YaHei", 10))
-password_entry.insert(0, get_config('user-account', 'password'))
-password_entry.grid(row=1, column=1, sticky="ew", padx=(10, 0))
+                env = os.environ.copy()
+                env['AUTOVISOR_NO_PROMPT'] = '1'
+                env.setdefault('PYTHONIOENCODING', 'utf-8')
+                env.setdefault('PYTHONUTF8', '1')
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    cwd=work_dir,
+                    env=env,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                for line in process.stdout:
+                    try:
+                        decoded_line = line.decode('utf-8')
+                    except UnicodeDecodeError:
+                        decoded_line = line.decode('gbk', errors='replace')
+                    append_log(decoded_line)
+                process.stdout.close()
+                process.wait()
+                append_log(f"[程序退出，状态码：{process.returncode}]")
+                flush_all_logs()  # 结束时立刻把剩下的全刷出来
+            except Exception as e:
+                append_log(f"[启动错误]: {str(e)}")
+                flush_all_logs()
 
-ttk.Label(required_frame, text="课程链接：", font=("Microsoft YaHei", 10)).grid(row=2, column=0, sticky="w", pady=8)
-course_entry = ttk.Entry(required_frame, width=35, font=("Microsoft YaHei", 10))
-course_entry.insert(0, get_config('course-url', 'url1'))
-course_entry.grid(row=2, column=1, sticky="ew", padx=(10, 0))
+        threading.Thread(target=run_process, daemon=True).start()
 
-ttk.Label(required_frame, text="时长限制(秒)：", font=("Microsoft YaHei", 10)).grid(row=3, column=0, sticky="w", pady=8)
-time_limit_entry = ttk.Entry(required_frame, width=35, font=("Microsoft YaHei", 10))
-time_limit_entry.insert(0, get_config('course-option', 'limitmaxtime'))
-time_limit_entry.grid(row=3, column=1, sticky="ew", padx=(10, 0))
+    # ====================
+    # 右侧：配置与控制区域
+    # ====================
+    # --- 变量与控件定义 ---
+    username_tf = ft.TextField(label="手机号 (留空则手动登录)", value=get_config('user-account', 'username'), height=50)
+    password_tf = ft.TextField(label="密码", value=get_config('user-account', 'password'), password=True, can_reveal_password=True, height=50)
+    course_tf = ft.TextField(label="课程链接 (以 studyvideoh5... 开头)", value=get_config('course-url', 'url1'), height=50)
+    limit_time_tf = ft.TextField(label="时长限制 (秒，0表示不限)", value=get_config('course-option', 'limitmaxtime'), height=50)
+    speed_tf = ft.TextField(label="倍速播放 (最大 1.8)", value=get_config('course-option', 'limitspeed'), height=50)
 
-ttk.Label(required_frame, text="倍速播放：", font=("Microsoft YaHei", 10)).grid(row=4, column=0, sticky="w", pady=8)
-speed_entry = ttk.Entry(required_frame, width=35, font=("Microsoft YaHei", 10))
-speed_entry.insert(0, get_config('course-option', 'limitspeed'))
-speed_entry.grid(row=4, column=1, sticky="ew", padx=(10, 0))
+    driver_dp = ft.Dropdown(
+        label="浏览器驱动",
+        value=get_config('browser-option', 'driver', 'Edge'),
+        options=[ft.dropdown.Option("Chrome"), ft.dropdown.Option("Edge"), ft.dropdown.Option("Firefox")]
+    )
+    exe_path_tf = ft.TextField(label="浏览器路径", value=get_config('browser-option', 'exe_path'), expand=True, height=50)
 
-# 设置列权重，使Entry充满宽度
-required_frame.columnconfigure(1, weight=1)
+    def pick_exe_result(e: ft.FilePickerResultEvent):
+        if e.files and len(e.files) > 0:
+            exe_path_tf.value = e.files[0].path
+            page.update()
 
-# 初始化选项变量（从configs.ini读取）
-verify_var = tk.StringVar(value=get_config('script-option', 'enableautocaptcha', 'False'))
-hide_var = tk.StringVar(value=get_config('script-option', 'enablehidewindow', 'False'))
-mute_var = tk.StringVar(value=get_config('course-option', 'soundoff', 'False'))
-driver_var = tk.StringVar(value=get_config('browser-option', 'driver', 'Edge'))
+    exe_picker = ft.FilePicker(on_result=pick_exe_result)
+    page.overlay.append(exe_picker)
 
-# === 浏览器配置区域 ===
-browser_frame = ttk.LabelFrame(main_frame, text="🌐 浏览器配置", padding=15)
-browser_frame.pack(fill=tk.X, pady=10)
+    def clear_exe(e):
+        exe_path_tf.value = ""
+        page.update()
 
-# 浏览器驱动选择
-ttk.Label(browser_frame, text="浏览器驱动：", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
-driver_combo = ttk.Combobox(browser_frame, textvariable=driver_var, values=["Chrome", "Edge", "Firefox"], state="readonly", width=32, font=("Microsoft YaHei", 10))
-driver_combo.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+    browse_row = ft.Row([
+        exe_path_tf,
+        ft.ElevatedButton("浏览", height=50, on_click=lambda _: exe_picker.pick_files(allowed_extensions=["exe"])),
+        ft.OutlinedButton("清空", height=50, on_click=clear_exe)
+    ])
 
-# 浏览器exe路径
-ttk.Label(browser_frame, text="浏览器路径：", font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
-path_input_frame = ttk.Frame(browser_frame)
-path_input_frame.grid(row=1, column=1, sticky="ew", padx=(10, 0))
+    auto_captcha_sw = ft.Switch(label="自动跳过验证码", value=(get_config('script-option', 'enableautocaptcha', 'False') == 'True'))
+    hide_window_sw = ft.Switch(label="隐藏浏览器窗口", value=(get_config('script-option', 'enablehidewindow', 'False') == 'True'))
+    mute_sw = ft.Switch(label="静音播放", value=(get_config('course-option', 'soundoff', 'False') == 'True'))
 
-exe_path_entry = ttk.Entry(path_input_frame, width=30, font=("Microsoft YaHei", 10))
-exe_path_entry.insert(0, get_config('browser-option', 'exe_path'))
-exe_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    # --- 动作与事件 ---
+    def save_and_run(e=None):
+        config.set('course-url', 'URL1', course_tf.value)
+        config.set('user-account', 'username', username_tf.value)
+        config.set('user-account', 'password', password_tf.value)
+        config.set('browser-option', 'driver', driver_dp.value)
+        config.set('browser-option', 'exe_path', exe_path_tf.value)
+        config.set('script-option', 'enableautocaptcha', str(auto_captcha_sw.value))
+        config.set('script-option', 'enablehidewindow', str(hide_window_sw.value))
+        config.set('course-option', 'limitmaxtime', limit_time_tf.value)
+        config.set('course-option', 'limitspeed', speed_tf.value)
+        config.set('course-option', 'soundoff', str(mute_sw.value))
 
-browse_button = ttk.Button(path_input_frame, text="浏览...", command=browse_exe_path, width=10)
-browse_button.pack(side=tk.LEFT, padx=(8, 0))
+        with open(config_file, 'w', encoding="utf-8") as f:
+            config.write(f)
 
-clear_button = ttk.Button(path_input_frame, text="清空", command=clear_exe_path, width=8)
-clear_button.pack(side=tk.LEFT, padx=(6, 0))
+        launch_script()
 
-# 提示文本
-hint_label = ttk.Label(browser_frame, text="（留空则使用系统默认路径）", font=("Microsoft YaHei", 8))
-hint_label.grid(row=2, column=1, sticky="w", padx=(10, 0), pady=(0, 5))
+    def close_dlg(e):
+        help_dlg.open = False
+        page.update()
 
-# 设置列权重
-browser_frame.columnconfigure(1, weight=1)
+    help_text = (
+        "【必要配置说明】\n"
+        "1. 账号密码：可选项，如留空需手动登录。\n"
+        "2. 课程链接：从智慧树页面复制链接（以 studyvideo 开头）。\n"
+        "3. 时长限制：为 0 则不限制。\n\n"
+        "【常见问题】\n"
+        "Q: 浏览器启动失败怎么办？\n"
+        "A: 程序需要对应浏览器的支持或放置正确版本的驱动。\n"
+    )
+    help_dlg = ft.AlertDialog(
+        title=ft.Text("❓ 使用说明"),
+        content=ft.Text(help_text),
+        actions=[ft.TextButton("我了解了", on_click=close_dlg)],
+    )
+    page.overlay.append(help_dlg)
 
-# === 可选配置区域 ===
-optional_frame = ttk.LabelFrame(main_frame, text="⚙️ 可选配置", padding=15)
-optional_frame.pack(fill=tk.X, pady=10)
+    def show_help(e):
+        help_dlg.open = True
+        page.update()
 
-# 自动跳过验证码
-ttk.Label(optional_frame, text="自动跳过验证码：", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
-verify_frame = ttk.Frame(optional_frame)
-verify_frame.grid(row=0, column=1, sticky="w", padx=(10, 0))
-ttk.Radiobutton(verify_frame, text="启用", variable=verify_var, value="True").pack(side=tk.LEFT, padx=5)
-ttk.Radiobutton(verify_frame, text="禁用", variable=verify_var, value="False").pack(side=tk.LEFT, padx=5)
+    # --- 模块化 UI 组装 ---
+    def create_card(title, icon, *controls):
+        return ft.Card(
+            elevation=0,
+            margin=ft.margin.only(bottom=20),
+            color=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            content=ft.Container(
+                padding=20,
+                border_radius=12,
+                border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                content=ft.Column([
+                    ft.Row([ft.Icon(icon, color=ft.Colors.PRIMARY, size=24), ft.Text(title, size=16, weight=ft.FontWeight.W_600)]),
+                    ft.Divider(height=10, color=ft.Colors.TRANSPARENT),
+                    *controls
+                ], spacing=15)
+            )
+        )
 
-# 隐藏浏览器窗口
-ttk.Label(optional_frame, text="隐藏浏览器窗口：", font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
-hide_frame = ttk.Frame(optional_frame)
-hide_frame.grid(row=1, column=1, sticky="w", padx=(10, 0))
-ttk.Radiobutton(hide_frame, text="启用", variable=hide_var, value="True").pack(side=tk.LEFT, padx=5)
-ttk.Radiobutton(hide_frame, text="禁用", variable=hide_var, value="False").pack(side=tk.LEFT, padx=5)
+    right_panel = ft.Container(
+        expand=True,
+        content=ft.ListView(
+            expand=True,
+            spacing=0,
+            controls=[
+                ft.Text("🎓 智慧树刷课助手", size=24, weight=ft.FontWeight.W_800, color=ft.Colors.PRIMARY, text_align=ft.TextAlign.CENTER),
+                ft.Divider(height=25, color=ft.Colors.TRANSPARENT),
 
-# 静音播放
-ttk.Label(optional_frame, text="静音播放：", font=("Microsoft YaHei", 10)).grid(row=2, column=0, sticky="w", pady=8)
-mute_frame = ttk.Frame(optional_frame)
-mute_frame.grid(row=2, column=1, sticky="w", padx=(10, 0))
-ttk.Radiobutton(mute_frame, text="启用", variable=mute_var, value="True").pack(side=tk.LEFT, padx=5)
-ttk.Radiobutton(mute_frame, text="禁用", variable=mute_var, value="False").pack(side=tk.LEFT, padx=5)
+                create_card("基本配置", ft.Icons.SETTINGS, username_tf, password_tf, course_tf, limit_time_tf, speed_tf),
+                create_card("浏览器配置", ft.Icons.WEB, driver_dp, browse_row),
+                create_card("附加功能", ft.Icons.EXTENSION, auto_captcha_sw, hide_window_sw, mute_sw),
 
-# === 按钮区域 ===
-button_frame = ttk.Frame(main_frame)
-button_frame.pack(fill=tk.X, pady=20)
+                ft.Container(
+                    margin=ft.margin.only(top=10, bottom=20),
+                    content=ft.Row([
+                        ft.ElevatedButton(
+                            content=ft.Row(
+                                [ft.Icon(ft.Icons.PLAY_ARROW_ROUNDED, size=24), ft.Text("开始刷课", size=16, weight=ft.FontWeight.W_600)],
+                                alignment=ft.MainAxisAlignment.CENTER,
+                                spacing=8
+                            ),
+                            expand=True,
+                            height=55,
+                            style=ft.ButtonStyle(
+                                shape=ft.RoundedRectangleBorder(radius=12),
+                                bgcolor=ft.Colors.PRIMARY,
+                                color=ft.Colors.ON_PRIMARY
+                            ),
+                            on_click=save_and_run
+                        ),
+                        ft.OutlinedButton(
+                            content=ft.Text("使用说明", size=16, weight=ft.FontWeight.W_600),
+                            expand=True,
+                            height=55,
+                            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12)),
+                            on_click=show_help
+                        )
+                    ], spacing=15)
+                )
+            ],
+            padding=ft.padding.only(right=15, left=10)
+        )
+    )
 
-# 开始刷课按钮
-start_button = ttk.Button(button_frame, text="▶️ 开始刷课", command=save_and_run)
-start_button.pack(side=tk.LEFT, padx=5)
+    left_side = ft.Column([
+        ft.Row([ft.Icon(ft.Icons.TERMINAL, size=28), ft.Text("控制台日志", size=20, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.START),
+        log_panel
+    ], expand=5)
 
-# 查看帮助按钮
-help_button = ttk.Button(button_frame, text="❓ 查看帮助", command=show_help)
-help_button.pack(side=tk.LEFT, padx=5)
+    right_side = ft.Column([right_panel], expand=4)
 
-# === 日志输出区域 ===
-log_frame = ttk.LabelFrame(main_frame, text="📝 运行日志", padding=10)
-log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+    # 加入主框架
+    page.add(
+        ft.Container(
+            content=ft.Row(
+                controls=[left_side, right_side],
+                expand=True,
+                spacing=25
+            ),
+            padding=10,
+            expand=True
+        )
+    )
 
-log_text = tk.Text(log_frame, wrap=tk.WORD, state=tk.DISABLED, font=("Consolas", 9), bg="#F8F9FA", height=12)
-log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-scrollbar = ttk.Scrollbar(log_frame, command=log_text.yview)
-scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-log_text.config(yscrollcommand=scrollbar.set)
-
-# 回车绑定
-root.bind('<Return>', lambda event: save_and_run())
-
-root.mainloop()
+if __name__ == '__main__':
+    # 既然已经通过镜像源装好了完整的 flet-desktop 依赖，
+    # 现在可以直接以原生的 Windows 桌面视窗模式启动了！
+    ft.app(target=main)
